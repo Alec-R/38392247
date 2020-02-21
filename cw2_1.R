@@ -2,90 +2,106 @@ rm(list = ls())
 #install.packages("mlbench")
 library(mlbench)
 library(caret)
+library(MASS)    # if use lda()
+#install.packages("pROC")
+library(pROC)    #if use .auc
 
 data("PimaIndiansDiabetes")
 #factorize the last column
 PimaIndiansDiabetes$diabetes = factor(PimaIndiansDiabetes$diabetes)
-#Scale data ------not used anymore
+#Scale data ------not used anymore------P4 knnvslda
 #diabetes_scale = scale(PimaIndiansDiabetes[-9])
-sd = 10  #for creating data
-kk = c(3, 5, 7, 9, 11, 13, 15, 17, 19, 21)
+sd1 = 100  #for creating data
+sd2 = 75
+sd3 = 0.674558976321
 
-# -------- creating data ----------------
-set.seed(sd)
+#to see if the auc increases as kk increases
+kk = c(3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39, 41, 43, 47, 49)
+#ROC was used to select the optimal model using the largest value.
+#The final value used for the model was k= 43. Good!!!
+#kk = c(3, 5, 7, 9, 11, 13, 15, 17, 19, 21)
+#------------creating data----------------
+
+set.seed(sd1)
 #Training Index
 i_train = createDataPartition(PimaIndiansDiabetes$diabetes, p = 0.7, times = 20, list = F)
 
-acc = vector("numeric", 10)
+#-------------Tune k----------------------------
 knnGrid = expand.grid(k = kk)
 for (i in 1:dim(i_train)[2]){
   X_train = PimaIndiansDiabetes[i_train[, i], -9]
   label_train = PimaIndiansDiabetes[i_train[, i], 9]
-  y_test = PimaIndiansDiabetes[-i_train[, i], -9]
-  label_test = PimaIndiansDiabetes[-i_train, 9]
   #knn classifier
-  set.seed(sd)
+  set.seed(sd2)
   fitControl = trainControl(method = "repeatedcv", 
                             number = 5, 
                             repeats = 5,
                             summaryFunction = twoClassSummary, 
-                            classProbs = TRUE)
-  set.seed(sd)
+                            classProbs = T)
+  set.seed(sd3)
   knnFit = train(X_train, label_train, method = "knn", 
                  trControl = fitControl, 
                  metric = "ROC",
                  preProcess = c("center","scale"), 
                  tuneGrid = knnGrid)
+ #auc??
+ #roc_knn = knnFit$results[, 2]
 }
 knnFit
 
+#------------knn prediction--------------
+#roc_knn = vector("numeric", 20)
+#auc_knn = vector("numeric", 20)
+for(i in 1:dim(i_train)[2]){
+  #Test Featurs and Test labels
+  y_test = PimaIndiansDiabetes[-i_train[, i], -9]
+  label_test = PimaIndiansDiabetes[-i_train[, i], 9]
+  #knn prediction
+  knn_pred = predict(knnFit, y_test)
+  #confusion matrix ---> name it?
+  confusionMatrix(knn_pred, label_test) 
+  #prob for classify
+  knn_probs = predict(knnFit, y_test, type="prob") 
+  head(knn_probs)
+  #ROC
+  # 'Positive' Class : neg
+  #response and levels ; controls and classes
+  roc_knn = roc(predictor = knn_probs$neg, response = label_test, 
+                levels = rev(levels(label_test))) 
+  ## ERROR!!! Setting direction: controls ? cases
+  roc_knn
+  auc_knn = roc_knn$auc
+  auc_knn
+}
+#ERROR!!!Setting direction: controls > cases
+
+#------------------LDA Prediction--------------------
+for(i in 1:dim(i_train)[2]){
+  X_train = PimaIndiansDiabetes[i_train[, i], -9]
+  label_train = PimaIndiansDiabetes[i_train[, i], 9]
+  #Test Featurs and Test labels
+  y_test = PimaIndiansDiabetes[-i_train[, i], -9]
+  label_test = PimaIndiansDiabetes[-i_train[, i], 9]
+  #lda classifier
+  ldaFit = train(X_train, label_train, method = "lda",
+               trControl = trainControl(summaryFunction = twoClassSummary, 
+                                        classProbs = T),
+               #preProcess = c("center","scale")
+               )
+  ldaFit
+  #LDA prediction
+  lda_pred = predict(ldaFit, y_test)
+  confusionMatrix(lda_pred, label_test)
+  #probabilities
+  lda_probs = predict(ldaFit, y_test, type = "prob")
+  head(lda_probs)
+  lda_roc = roc(predictor = lda_probs$neg, 
+                response = label_test,
+                levels = rev(levels(label_test)))
+  lda_auc = lda_roc$auc
+}
 #----------
 
-# -------- Question 2.i - ROC curve of KNN and LDA --------
 
-library(pROC) 
-
-# ROC curve for KNN
-knn.pred <- predict(knnFit,test.feature)
-knn.probs <- predict(knnFit,test.feature,type="prob")
-# create ROC curve point vector with probabilities
-knn.ROC <- roc(predictor=knn.probs$Bad, response=test.label,
-               levels=rev(levels(test.label)))
-
-# ROC curve for lda
-lda.pred <- predict(ldaFit,test.feature) confusionMatrix(lda.pred,test.label)
-lda.probs <- predict(ldaFit,test.feature,type="prob")
-# create ROC curve point vector
-lda.ROC <- roc(predictor=lda.probs$Bad, response=test.label, 
-               levels=rev(levels(test.label)))
-
-# Plot for the KNN ROC and the LDA ROC
-# Grouping both plot elements for clarity
-plot(knn.ROC,main="ROC curve", col="black")
-lines(lda.ROC,col="blue") ## add a line to previous plot 
-# plot legend
-legend("bottomright",legend=c("kNN","LDA"),
-       col=c("black","blue"),
-       lty=c(1,1),cex=1,text.font=2)
-
-
-# -------- Question 2.ii - Boxplots --------
-
-pred=predict(knnFit,test.feature) 
-acc[ii]=mean(pred==test.label) #accuracy vectors
-ti1 = c("KNN", "LDA") # resp names for accuracy vectors
-
-acc <- c(KNNacc,LDAacc) # accuracy matrix for boxplot
-# Boxplot for both vectors
-featurePlot(x = acc,# maybe add if error [,]
-            y = ti1, # idem
-            plot = "box",
-            ## Pass in options to bwplot() 
-            scales = list(y = list(relation="free"),
-                          x = list(rot = 90)),  # ?? vertical boxplot ?
-            layout = c(2,1 ), 
-            auto.key = list(columns = 2))
-
-# end
 
 
